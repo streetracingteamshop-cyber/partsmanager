@@ -1,0 +1,9 @@
+Parts Manager icon
+
+The bundled icon is an original simple automotive illustration created for the Parts Manager installer.
+It is not a brand logo and does not use a vehicle manufacturer trademark.
+It was designed after reviewing public-domain / CC0 automotive icon references, including: 
+https://www.svgrepo.com/svg/7472963/auto-parts
+
+The referenced SVG Repo item is marked CC0 on the source page.
+The bundled Parts Manager icon itself is original artwork and may be used, modified, and distributed with the Parts Manager product.
