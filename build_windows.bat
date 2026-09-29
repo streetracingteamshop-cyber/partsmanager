@@ -25,5 +25,5 @@ if exist installer_output rmdir /s /q installer_output
 if errorlevel 1 exit /b %errorlevel%
 
 echo.
-echo SUCCESS: installer_output\PartsManager-Setup-12.6.0.exe
-dir /b installer_output\PartsManager-Setup-12.6.0.exe
+echo SUCCESS: installer_output\PartsManager-Setup-*.exe
+dir /b installer_output\PartsManager-Setup-*.exe

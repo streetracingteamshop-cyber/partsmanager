@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from email.message import EmailMessage
 from email.utils import formataddr
 from datetime import datetime, timedelta
-import json, os, uuid, html, ssl, threading, logging, re, socket, webbrowser, time, sys, smtplib, sqlite3, imaplib, email, email.utils, email.header, csv, io, zipfile, hashlib
+import json, os, uuid, html, ssl, threading, logging, re, socket, webbrowser, time, sys, smtplib, sqlite3, imaplib, email, email.utils, email.header, csv, io, zipfile, hashlib, tempfile, shutil, subprocess
 from logging.handlers import RotatingFileHandler
 
 VERSION = "12.6.0"
@@ -274,46 +274,50 @@ def github_latest():
     tag = str(obj.get("tag_name") or "").lstrip("vV")
     if not tag:
         return None, "GitHub: у latest release нет tag_name"
-    return {"tag": tag, "zipball_url": obj.get("zipball_url"), "name": obj.get("name") or tag}, ""
+    assets = obj.get("assets") or []
+    installer = next((a for a in assets if str(a.get("name", "")).lower().endswith(".exe") and "partsmanager-setup" in str(a.get("name", "")).lower()), None)
+    return {
+        "tag": tag,
+        "name": obj.get("name") or tag,
+        "html_url": obj.get("html_url") or "",
+        "installer_url": installer.get("browser_download_url") if installer else None,
+        "installer_name": installer.get("name") if installer else None,
+        "zipball_url": obj.get("zipball_url"),
+    }, ""
 
 def update_from_github():
     latest, err = github_latest()
-    if err: return False, err
+    if err:
+        return False, err
     if github_version_key(latest["tag"]) <= github_version_key(VERSION):
         return False, f"Установлена актуальная версия {VERSION}"
-    if not latest.get("zipball_url"):
-        return False, "GitHub: отсутствует архив релиза"
+    if os.name != "nt":
+        return False, "Автоустановка GitHub Release поддерживается в Windows-версии приложения"
+    installer_url = latest.get("installer_url")
+    if not installer_url:
+        return False, "GitHub: в последнем Release не найден установщик PartsManager-Setup-*.exe"
     temp = tempfile.mkdtemp(prefix="parts_manager_update_")
     try:
-        archive = os.path.join(temp, "release.zip")
-        req = Request(latest["zipball_url"], headers={"User-Agent": f"PartsManager/{VERSION}"})
-        with urlopen(req, timeout=60, context=ssl.create_default_context()) as r:
-            with open(archive, "wb") as f:
+        installer = os.path.join(temp, latest.get("installer_name") or f"PartsManager-Setup-{latest['tag']}.exe")
+        req = Request(installer_url, headers={"Accept": "application/octet-stream", "User-Agent": f"PartsManager/{VERSION}"})
+        with urlopen(req, timeout=120, context=ssl.create_default_context()) as r:
+            with open(installer, "wb") as f:
                 shutil.copyfileobj(r, f)
-        extract = os.path.join(temp, "src")
-        with zipfile.ZipFile(archive) as z:
-            z.extractall(extract)
-        roots = [os.path.join(extract, x) for x in os.listdir(extract)]
-        root = next((x for x in roots if os.path.isdir(x) and os.path.exists(os.path.join(x, "parts_manager.py"))), None)
-        if not root:
-            raise RuntimeError("В GitHub-архиве не найден parts_manager.py")
-        # Never overwrite runtime data; user data is stored outside HERE by default.
-        skip = {"data", "__pycache__", ".git"}
-        for name in os.listdir(root):
-            if name in skip: continue
-            src_path = os.path.join(root, name)
-            dst_path = os.path.join(HERE, name)
-            if os.path.isdir(src_path):
-                shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
-            else:
-                shutil.copy2(src_path, dst_path)
-        logging.info("Updated Parts Manager %s -> %s", VERSION, latest["tag"])
-        return True, f"Обновлено до {latest['tag']}"
+        if not os.path.exists(installer) or os.path.getsize(installer) < 100_000:
+            raise RuntimeError("GitHub: установщик скачан некорректно")
+        subprocess.Popen([installer, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"], cwd=temp, close_fds=True)
+        logging.info("Starting installer update %s -> %s", VERSION, latest["tag"])
+        # The installer must be able to replace application files. Exit this process after
+        # launching it; user data lives outside the installation directory.
+        threading.Timer(1.0, lambda: os._exit(0)).start()
+        return True, f"Запущено обновление до {latest['tag']}. Приложение будет закрыто."
     except Exception as ex:
         logging.exception("GitHub update failed")
         return False, f"Обновление не выполнено: {ex}"
     finally:
-        shutil.rmtree(temp, ignore_errors=True)
+        # The installer is independent of this process. Keep the temp directory until reboot
+        # because Windows may still be reading the downloaded installer.
+        pass
 
 def start_auto_update():
     settings = read("settings")
